@@ -1,0 +1,17 @@
+# Credential captures and extracted creds (sensitive)
+creds/
+
+# Runtime output
+logs/
+serve/
+
+# Generated CA private key — never commit
+ca/
+
+# Stray captures
+*.pcap
+*.pcapng
+
+# Local brainstorming scratch (naming / banner options)
+name_options.txt
+ascii_options.txt
