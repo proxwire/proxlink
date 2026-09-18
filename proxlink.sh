@@ -44,8 +44,25 @@ ADDED_ALIASES=()
 DNSMASQ_CONF="/etc/dnsmasq.d/custom-dhcp.conf"
 ORIG_IP_FORWARD=""
 
-pl_msg() { echo "    >> $*"; }
-pl_err() { echo "    >> ERROR: $*" >&2; }
+# ── Cyberpunk 2077 palette ──────────────────────────────────────────────────
+# Signature neon yellow, cyan and hot magenta on black, red for alerts. Colour
+# is emitted only to a real terminal (and honours NO_COLOR), so piped output and
+# the dnsmasq/pcap logs never get polluted with escape codes.
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+    C_YEL=$'\033[38;5;226m'   # CP2077 signature yellow
+    C_CYN=$'\033[38;5;51m'    # neon cyan
+    C_MAG=$'\033[38;5;198m'   # hot magenta / pink
+    C_GRN=$'\033[38;5;48m'    # matrix green
+    C_RED=$'\033[38;5;196m'   # alert red
+    C_DIM=$'\033[38;5;244m'   # dim grey
+    C_BLD=$'\033[1m'
+    C_RST=$'\033[0m'
+else
+    C_YEL=""; C_CYN=""; C_MAG=""; C_GRN=""; C_RED=""; C_DIM=""; C_BLD=""; C_RST=""
+fi
+
+pl_msg() { echo "    ${C_YEL}${C_BLD}>>${C_RST} $*"; }
+pl_err() { echo "    ${C_RED}${C_BLD}>> ERROR:${C_RST} ${C_RED}$*${C_RST}" >&2; }
 
 # Remove only the firewall rules this script adds. Called once before setup to
 # clear leftovers from a previous run, and again on exit. Kept separate from
@@ -247,7 +264,7 @@ DHCP_RANGE="${NETWORK_PREFIX}.3,${NETWORK_PREFIX}.200,12h"
 INITIAL_STATIC_IP="${NETWORK_PREFIX}.1"
 
 echo ""
-pl_msg "proxlink :: initiating personal link..."
+echo "    ${C_MAG}::${C_RST} ${C_YEL}${C_BLD}proxlink${C_RST} ${C_MAG}::${C_RST} ${C_CYN}initiating personal link...${C_RST}"
 missing=""
 command -v dnsmasq  &>/dev/null || missing="$missing dnsmasq"
 command -v arp-scan &>/dev/null || missing="$missing arp-scan"
@@ -299,11 +316,11 @@ detect_static_ips() {
         echo "No other subnets detected. Device might use DHCP on $NETWORK_PREFIX.0/24, or try again with device active."
         return
     fi
-    echo "--- Possible static-IP device(s) on different subnet(s) ---"
+    echo "${C_CYN}── Possible static-IP device(s) on different subnet(s) ──${C_RST}"
     for prefix in "${subnets[@]}"; do
-        echo "  Subnet: $prefix.0/24  -> rerun with:  -p $prefix"
+        printf "  ${C_CYN}Subnet:${C_RST} ${C_MAG}%s.0/24${C_RST}  -> rerun with:  ${C_YEL}-p %s${C_RST}\n" "$prefix" "$prefix"
     done
-    echo "---"
+    echo "${C_CYN}──${C_RST}"
     echo "Add these as alias IPs on $INTERFACE so you can reach them without rerunning? (y/n)"
     read -r add_aliases
     if [[ "$add_aliases" == [yY] || "$add_aliases" == [yY][eE][sS] ]]; then
@@ -364,7 +381,7 @@ capture_creds() {
     done
     own_as_invoker "$CREDS_DIR"
     if [[ $found -eq 1 ]]; then
-        echo "*** Credentials found! Stored in $logfile ***"
+        echo "${C_RED}${C_BLD}*** CREDENTIALS FOUND! ***${C_RST} ${C_YEL}stored in $logfile${C_RST}"
     elif [[ $extracted -eq 1 ]]; then
         echo "No credentials in this capture. Pcap saved at $pcap"
     else
@@ -379,9 +396,9 @@ scan_network() {
 
 show_dns_log() {
     if [[ -f "$LOGS_DIR/dns.log" ]]; then
-        echo "--- last 30 DNS queries ---"
+        echo "${C_CYN}── last 30 DNS queries ──${C_RST}"
         tail -n 30 "$LOGS_DIR/dns.log"
-        echo "---"
+        echo "${C_CYN}──${C_RST}"
     else
         pl_msg "No DNS log yet (queries appear after the first device connects)."
     fi
@@ -424,10 +441,11 @@ HOOKEOF
     (
         while read -r action mac ip host; do
             label="NEW"; [[ "$action" == "old" ]] && label="RECONNECT"
-            printf "\n    >> [%s DEVICE] %s  mac: %s%s\n" \
-                "$label" "$ip" "$mac" "${host:+  host: $host}"
+            lc="$C_CYN"; [[ "$action" == "old" ]] && lc="$C_MAG"
+            printf "\n    ${C_YEL}${C_BLD}>>${C_RST} ${lc}${C_BLD}[%s DEVICE]${C_RST} ${C_YEL}%s${C_RST}  ${C_DIM}mac:${C_RST} %s%s\n" \
+                "$label" "$ip" "$mac" "${host:+  ${C_DIM}host:${C_RST} $host}"
             scan_network
-            printf "    >> await input...\n"
+            printf "    ${C_YEL}${C_BLD}>>${C_RST} ${C_DIM}await input...${C_RST}\n"
         done
     ) < "$DEVICE_FIFO" &
     DEVICE_WATCHER_PID=$!
@@ -560,12 +578,12 @@ fi
 # ── Banner ────────────────────────────────────────────────────────────────────
 
 echo ""
-echo "    :: proxlink ::  ═══  [PERSONAL LINK ACTIVE]  ═══  ::"
-printf "    >> interface: %-8s | subnet: %s.0/%s | dhcp: ONLINE" "$INTERFACE" "$NETWORK_PREFIX" "$PREFIX_LEN"
+echo "    ${C_MAG}::${C_RST} ${C_YEL}${C_BLD}proxlink${C_RST} ${C_MAG}::${C_RST}  ${C_CYN}═══${C_RST}  ${C_YEL}${C_BLD}[PERSONAL LINK ACTIVE]${C_RST}  ${C_CYN}═══${C_RST}  ${C_MAG}::${C_RST}"
+printf "    ${C_YEL}${C_BLD}>>${C_RST} ${C_CYN}interface:${C_RST} ${C_MAG}%-8s${C_RST} ${C_DIM}|${C_RST} ${C_CYN}subnet:${C_RST} ${C_YEL}%s.0/%s${C_RST} ${C_DIM}|${C_RST} ${C_CYN}dhcp:${C_RST} ${C_GRN}ONLINE${C_RST}" "$INTERFACE" "$NETWORK_PREFIX" "$PREFIX_LEN"
 if [[ $BURP_ENABLED -eq 1 ]]; then
-    printf " | burp: %s\n" "$BURP_PORT"
+    printf " ${C_DIM}|${C_RST} ${C_CYN}burp:${C_RST} ${C_YEL}%s${C_RST}\n" "$BURP_PORT"
 else
-    printf " | burp: --\n"
+    printf " ${C_DIM}|${C_RST} ${C_CYN}burp:${C_RST} ${C_DIM}--${C_RST}\n"
 fi
 [[ $SHARE_INTERNET -eq 1 ]] && pl_msg "internet sharing: $INTERNET_INTERFACE -> $INTERFACE"
 [[ $DNS_SPOOF     -eq 1 ]] && pl_msg "dns spoof: ON -> $INITIAL_STATIC_IP  |  dns log: $LOGS_DIR/dns.log"
@@ -576,7 +594,7 @@ echo ""
 
 # ── Interactive loop ──────────────────────────────────────────────────────────
 
-KEYS="Enter=scan  d=detect static IPs  c=capture creds  l=dns log  (Ctrl+C=exit)"
+KEYS="${C_CYN}Enter${C_RST}=scan  ${C_CYN}d${C_RST}=detect static IPs  ${C_CYN}c${C_RST}=capture creds  ${C_CYN}l${C_RST}=dns log  ${C_DIM}(Ctrl+C=exit)${C_RST}"
 pl_msg "$KEYS"
 # `while read` (not `while true; do read`) so a closed stdin ends the loop
 # instead of spinning at 100% CPU.
@@ -585,7 +603,7 @@ while read -r input; do
         d|D) detect_static_ips ;;
         c|C) capture_creds ;;
         l|L) show_dns_log ;;
-        "")  echo "Scanning..."; scan_network ;;
+        "")  echo "${C_CYN}scanning...${C_RST}"; scan_network ;;
         *)   pl_msg "$KEYS" ;;
     esac
 done
