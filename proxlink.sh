@@ -43,6 +43,7 @@ CLEANED_UP=0
 ADDED_ALIASES=()
 DNSMASQ_CONF="/etc/dnsmasq.d/custom-dhcp.conf"
 ORIG_IP_FORWARD=""
+ORIG_DNSMASQ_ACTIVE=""
 
 # ── Cyberpunk 2077 palette ──────────────────────────────────────────────────
 # Signature neon yellow, cyan and hot magenta on black, red for alerts. Colour
@@ -109,6 +110,12 @@ enable_ip_forwarding() {
 # link. Deliberately broad — note it also stops a libvirt/LXD dnsmasq if one
 # is running on this host.
 clear_competing_dhcp() {
+    # Remember whether the host's own dnsmasq unit was running before we touch
+    # it, so cleanup can put it back exactly as it was (some hosts use dnsmasq
+    # as their system resolver — stopping it for good would break their DNS).
+    if [[ -z "$ORIG_DNSMASQ_ACTIVE" ]]; then
+        systemctl is-active --quiet dnsmasq && ORIG_DNSMASQ_ACTIVE=1 || ORIG_DNSMASQ_ACTIVE=0
+    fi
     systemctl stop dnsmasq 2>/dev/null
     pkill -f dhclient 2>/dev/null
     pkill -f dnsmasq 2>/dev/null
@@ -138,9 +145,16 @@ cleanup() {
     [[ -n "$VLAN_IFACE" ]] && ip link del "$VLAN_IFACE" 2>/dev/null
     rm -f "$DNSMASQ_CONF"
     [[ -n "$RUN_TMPDIR" ]] && rm -rf "$RUN_TMPDIR"
-    # Stop only the unit this script started; no broad pkill, which would take
+    # Restore dnsmasq to the state it was in before we ran. Our config is now
+    # removed, so if the host was running dnsmasq as its own resolver, a restart
+    # brings it back with only the system config (host DNS restored); if it was
+    # not running before, leave it stopped. No broad pkill — that would take
     # down an unrelated libvirt/LXD dnsmasq along with it.
-    systemctl stop dnsmasq 2>/dev/null
+    if [[ "$ORIG_DNSMASQ_ACTIVE" == "1" ]]; then
+        systemctl restart dnsmasq 2>/dev/null
+    else
+        systemctl stop dnsmasq 2>/dev/null
+    fi
     pl_msg "cleanup complete."
 }
 
@@ -521,10 +535,22 @@ make_output_dir "$LOGS_DIR"
 pl_msg "dhcp range: $NETWORK_PREFIX.3-$NETWORK_PREFIX.200 on $INTERFACE"
 {
     echo "interface=$INTERFACE"
+    # Confine dnsmasq to $INTERFACE only. Without these two lines, "interface="
+    # does NOT stop dnsmasq binding the wildcard 0.0.0.0:53, and dnsmasq also
+    # auto-adds loopback to its listen set — so it answers the host's own
+    # queries on 127.0.0.1. Combined with the "-D" wildcard spoof below that
+    # redirects every host lookup to $INITIAL_STATIC_IP, i.e. it breaks the
+    # host's DNS. bind-interfaces makes it bind only $INTERFACE's address, and
+    # except-interface=lo keeps it off loopback. The device is served exactly
+    # as before; the host is never touched.
+    echo "bind-interfaces"
+    echo "except-interface=lo"
     echo "dhcp-range=$DHCP_RANGE"
     echo "dhcp-script=$DHCP_HOOK"
     echo "log-queries"
     echo "log-facility=$LOGS_DIR/dns.log"
+    # Now safe: with the binding confined above, this only spoofs queries that
+    # arrive on $INTERFACE (the target device), not the host.
     [[ $DNS_SPOOF -eq 1 ]] && echo "address=/#/$INITIAL_STATIC_IP"
 } > "$DNSMASQ_CONF"
 
